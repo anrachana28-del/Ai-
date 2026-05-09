@@ -1,7 +1,6 @@
 flask
-moviepy
-whisper
-deep-translator
-TTS
 requests
-gunicorn
+moviepy
+openai-whisper
+deep-translator
+TTS==0.22.0

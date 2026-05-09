@@ -3,4 +3,3 @@ requests
 moviepy
 openai-whisper
 deep-translator
-TTS==0.22.0

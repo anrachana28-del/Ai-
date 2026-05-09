@@ -1,0 +1,7 @@
+flask
+moviepy
+whisper
+deep-translator
+TTS
+requests
+gunicorn

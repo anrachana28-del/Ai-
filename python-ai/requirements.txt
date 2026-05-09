@@ -1,5 +1,9 @@
 flask
 requests
-moviepy
+moviepy==1.0.3
 openai-whisper
 deep-translator
+cloudinary
+numpy
+imageio
+imageio-ffmpeg

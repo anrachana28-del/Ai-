@@ -11,7 +11,11 @@ require("dotenv").config();
 const app = express();
 const server = http.createServer(app);
 
-app.use(cors());
+/* ✅ FIX CORS */
+app.use(cors({
+    origin: "*"
+}));
+
 app.use(express.json());
 
 /* SAFE UPLOAD FOLDER */
@@ -22,7 +26,7 @@ if (!fs.existsSync(uploadDir)) {
 
 const upload = multer({ dest: uploadDir });
 
-/* HEALTH */
+/* HEALTH CHECK */
 app.get("/", (req, res) => {
     res.send("AI Server Running 🚀");
 });
@@ -35,6 +39,13 @@ app.post("/upload", upload.single("video"), async (req, res) => {
     }
 
     try {
+
+        /* CHECK ENV */
+        if (!process.env.CLOUDINARY_CLOUD || !process.env.CLOUDINARY_PRESET) {
+            return res.status(500).json({
+                error: "Cloudinary config missing"
+            });
+        }
 
         /* 1. UPLOAD TO CLOUDINARY */
         const cloudForm = new FormData();
@@ -50,12 +61,14 @@ app.post("/upload", upload.single("video"), async (req, res) => {
 
         const videoUrl = cloudRes.data.secure_url;
 
-        /* 2. SEND TO PYTHON AI */
-        const result = await axios.post(process.env.PYTHON_API, {
-            videoUrl
-        });
+        /* 2. CALL PYTHON WITH TIMEOUT */
+        const result = await axios.post(
+            process.env.PYTHON_API,
+            { videoUrl },
+            { timeout: 300000 } // 5 min safe
+        );
 
-        /* 3. CLEAN TEMP FILE */
+        /* 3. CLEAN FILE */
         fs.unlink(req.file.path, () => {});
 
         res.json({

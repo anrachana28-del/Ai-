@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>AI TikTok Pro Max</title>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+<style>
+body {
+    margin:0;
+    background:black;
+    color:white;
+    font-family:Arial;
+}
+
+.glow {
+    position:absolute;
+    width:300px;
+    height:300px;
+    background:#00ff99;
+    filter:blur(150px);
+    opacity:0.2;
+}
+
+.card {
+    width:380px;
+    margin:auto;
+    margin-top:40px;
+    background:rgba(255,255,255,0.05);
+    padding:20px;
+    border-radius:20px;
+    backdrop-filter: blur(10px);
+}
+
+.bar {
+    width:100%;
+    height:12px;
+    background:#222;
+    border-radius:20px;
+}
+
+.fill {
+    height:100%;
+    width:0%;
+    background:linear-gradient(90deg,#00ff99,#00ccff);
+    transition:0.3s;
+}
+
+video {
+    width:100%;
+    margin-top:15px;
+    border-radius:15px;
+    display:none;
+}
+
+button {
+    width:100%;
+    padding:12px;
+    margin-top:10px;
+    border:none;
+    border-radius:12px;
+    background:linear-gradient(90deg,#00ff99,#00ccff);
+    cursor:pointer;
+}
+</style>
+</head>
+
+<body>
+
+<div class="glow"></div>
+
+<div class="card">
+
+<h2>🎬 AI TikTok Translator</h2>
+
+<input type="file" id="file">
+
+<button onclick="upload()">UPLOAD</button>
+
+<div class="bar">
+    <div class="fill" id="fill"></div>
+</div>
+
+<p id="status">Ready</p>
+
+<video id="video" controls></video>
+
+<a id="download" style="display:none" download>
+    <button>⬇ Download</button>
+</a>
+
+</div>
+
+<script>
+const API = "https://your-node.onrender.com/upload";
+
+function upload(){
+
+    const file = document.getElementById("file").files[0];
+
+    const form = new FormData();
+    form.append("video", file);
+
+    fetch(API, {
+        method:"POST",
+        body:form
+    })
+    .then(res => res.json())
+    .then(data => {
+
+        document.getElementById("status").innerText = "Done";
+
+        const video = document.getElementById("video");
+        video.src = data.outputVideo;
+        video.style.display = "block";
+
+        const dl = document.getElementById("download");
+        dl.href = data.outputVideo;
+        dl.style.display = "block";
+    });
+}
+</script>
+
+</body>
+</html>

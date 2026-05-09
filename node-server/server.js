@@ -5,86 +5,68 @@ const http = require("http");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
+const FormData = require("form-data");
 require("dotenv").config();
-
-const { bucket } = require("./firebase");
-const { init, progress } = require("./socket");
 
 const app = express();
 const server = http.createServer(app);
 
-init(server);
-
 app.use(cors());
 app.use(express.json());
 
-/* =========================
-   SAFE UPLOAD FOLDER FIX
-========================= */
+/* SAFE UPLOAD FOLDER */
 const uploadDir = path.join(__dirname, "uploads");
-
-// prevent crash (important fix)
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-const upload = multer({
-    dest: uploadDir,
-    limits: {
-        fileSize: 100 * 1024 * 1024 // 100MB limit (optional safe)
-    }
+const upload = multer({ dest: uploadDir });
+
+/* HEALTH */
+app.get("/", (req, res) => {
+    res.send("AI Server Running 🚀");
 });
 
-/* =========================
-   UPLOAD API
-========================= */
+/* UPLOAD API */
 app.post("/upload", upload.single("video"), async (req, res) => {
 
     if (!req.file) {
-        return res.status(400).json({ error: "No video uploaded" });
+        return res.status(400).json({ error: "No file uploaded" });
     }
 
     try {
-        const fileName = Date.now() + ".mp4";
-        const firebasePath = "videos/" + fileName;
 
-        progress(10, "Uploading to Firebase...");
+        /* 1. UPLOAD TO CLOUDINARY */
+        const cloudForm = new FormData();
 
-        // Upload to Firebase
-        await bucket.upload(req.file.path, {
-            destination: firebasePath,
-            metadata: {
-                contentType: "video/mp4"
-            }
-        });
+        cloudForm.append("file", fs.createReadStream(req.file.path));
+        cloudForm.append("upload_preset", process.env.CLOUDINARY_PRESET);
 
-        const file = bucket.file(firebasePath);
-        await file.makePublic();
+        const cloudRes = await axios.post(
+            `https://api.cloudinary.com/v1_1/${process.env.CLOUDINARY_CLOUD}/video/upload`,
+            cloudForm,
+            { headers: cloudForm.getHeaders() }
+        );
 
-        const videoUrl =
-            `https://storage.googleapis.com/${bucket.name}/${firebasePath}`;
+        const videoUrl = cloudRes.data.secure_url;
 
-        progress(40, "AI Processing...");
-
-        // Call Python AI
+        /* 2. SEND TO PYTHON AI */
         const result = await axios.post(process.env.PYTHON_API, {
             videoUrl
         });
 
-        progress(100, "Done");
-
-        // CLEAN TEMP FILE (VERY IMPORTANT)
+        /* 3. CLEAN TEMP FILE */
         fs.unlink(req.file.path, () => {});
 
         res.json({
-            outputVideo: result.data.outputVideo,
-            text: result.data.khmer
+            outputVideo: result.data.outputVideo || videoUrl,
+            text: result.data.khmer || "Done"
         });
 
     } catch (err) {
-        console.error("UPLOAD ERROR:", err);
 
-        // clean file even if error
+        console.log("ERROR:", err.message);
+
         if (req.file) {
             fs.unlink(req.file.path, () => {});
         }
@@ -96,11 +78,9 @@ app.post("/upload", upload.single("video"), async (req, res) => {
     }
 });
 
-/* =========================
-   START SERVER
-========================= */
+/* START SERVER */
 const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
-    console.log("🚀 Server running on port", PORT);
+    console.log("Server running on", PORT);
 });

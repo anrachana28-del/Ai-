@@ -6,12 +6,13 @@ const fs = require("fs");
 const path = require("path");
 const admin = require("firebase-admin");
 const FormData = require("form-data");
+const cloudinary = require("cloudinary").v2;
 require("dotenv").config();
 
 const app = express();
 
 /* =========================
-   BASIC MIDDLEWARE
+   MIDDLEWARE
 ========================= */
 app.use(cors({ origin: "*" }));
 app.use(express.json());
@@ -20,17 +21,22 @@ app.use(express.json());
    UPLOAD FOLDER
 ========================= */
 const uploadDir = path.join(__dirname, "uploads");
-
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-/* =========================
-   MULTER CONFIG
-========================= */
 const upload = multer({
     dest: uploadDir,
-    limits: { fileSize: 50 * 1024 * 1024 } // 50MB safe
+    limits: { fileSize: 50 * 1024 * 1024 }
+});
+
+/* =========================
+   CLOUDINARY CONFIG
+========================= */
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
 /* =========================
@@ -53,7 +59,7 @@ try {
         });
 
         db = admin.firestore();
-        console.log("🔥 Firebase Connected");
+        console.log("🔥 Firebase connected");
     } else {
         console.log("⚠️ Firebase ENV missing");
     }
@@ -70,9 +76,9 @@ async function saveToFirebase(original, khmer, videoUrl) {
 
     try {
         await db.collection("ai_videos").add({
-            original: original || "",
-            khmer: khmer || "",
-            videoUrl: videoUrl || "",
+            original,
+            khmer,
+            videoUrl,
             createdAt: Date.now()
         });
     } catch (err) {
@@ -88,7 +94,7 @@ app.get("/", (req, res) => {
 });
 
 /* =========================
-   UPLOAD + AI PROCESS
+   UPLOAD + AI PIPELINE
 ========================= */
 app.post("/upload", upload.single("video"), async (req, res) => {
 
@@ -100,30 +106,34 @@ app.post("/upload", upload.single("video"), async (req, res) => {
             return res.status(400).json({ error: "No file uploaded" });
         }
 
-        if (!process.env.PYTHON_API) {
-            return res.status(500).json({ error: "PYTHON_API missing" });
+        /* =========================
+           1. UPLOAD TO CLOUDINARY
+        ========================= */
+        let cloudResult;
+
+        try {
+            cloudResult = await cloudinary.uploader.upload(filePath, {
+                resource_type: "video"
+            });
+        } catch (err) {
+            console.log("Cloudinary error:", err.message);
+            return res.status(500).json({ error: "Cloud upload failed" });
         }
 
-        let videoUrl = null;
-        let khmerText = "";
+        const videoUrl = cloudResult.secure_url;
 
         /* =========================
-           CALL PYTHON API
+           2. CALL PYTHON AI
         ========================= */
-        try {
-            const form = new FormData();
-            form.append("video", fs.createReadStream(filePath));
+        let khmerText = "";
 
+        try {
             const result = await axios.post(
                 process.env.PYTHON_API,
-                form,
-                {
-                    headers: form.getHeaders(),
-                    timeout: 300000
-                }
+                { videoUrl },
+                { timeout: 300000 }
             );
 
-            videoUrl = result.data.outputVideo;
             khmerText = result.data.khmer || "";
 
         } catch (err) {
@@ -131,16 +141,16 @@ app.post("/upload", upload.single("video"), async (req, res) => {
         }
 
         /* =========================
-           AUTO SAVE FIREBASE
+           3. SAVE TO FIREBASE
         ========================= */
         await saveToFirebase(
-            "original video text",
+            "original video",
             khmerText,
             videoUrl
         );
 
         /* =========================
-           CLEAN FILE
+           4. CLEAN TEMP FILE
         ========================= */
         fs.unlink(filePath, () => {});
 
@@ -171,7 +181,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
 /* =========================
    START SERVER (RENDER SAFE)
 ========================= */
-const PORT = process.env.PORT || 1000;
+const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
     console.log("🚀 Server running on port", PORT);

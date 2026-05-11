@@ -4,35 +4,65 @@ const axios = require("axios");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
-const FormData = require("form-data");
+const admin = require("firebase-admin");
 require("dotenv").config();
+const FormData = require("form-data");
 
 const app = express();
 
+/* =========================
+   FIREBASE INIT
+========================= */
+admin.initializeApp({
+    credential: admin.credential.cert(require("./firebase-key.json"))
+});
+
+const db = admin.firestore();
+
+/* =========================
+   MIDDLEWARE
+========================= */
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-/* Upload folder */
+/* =========================
+   UPLOAD FOLDER
+========================= */
 const uploadDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-/* Multer config */
+/* =========================
+   MULTER
+========================= */
 const upload = multer({
     dest: uploadDir,
     limits: { fileSize: 10 * 1024 * 1024 }
 });
 
-/* Health check */
+/* =========================
+   SAVE TO FIREBASE (AUTO)
+========================= */
+async function saveToFirebase(original, khmer, videoUrl) {
+    await db.collection("ai_videos").add({
+        original: original,
+        khmer: khmer,
+        videoUrl: videoUrl,
+        createdAt: Date.now()
+    });
+}
+
+/* =========================
+   HEALTH CHECK
+========================= */
 app.get("/", (req, res) => {
-    res.send("AI Server Running 🚀");
+    res.send("AI Video System Running 🚀");
 });
 
-/* Static files (IMPORTANT FOR VIDEO) */
-app.use("/files", express.static("uploads"));
-
-/* Upload API */
+/* =========================
+   UPLOAD + AI + AUTO SAVE
+========================= */
 app.post("/upload", upload.single("video"), async (req, res) => {
 
     let filePath = req.file?.path;
@@ -47,13 +77,16 @@ app.post("/upload", upload.single("video"), async (req, res) => {
             return res.status(500).json({ error: "PYTHON_API missing" });
         }
 
-        let videoUrl = null;
+        /* =========================
+           CALL PYTHON AI
+        ========================= */
+        let result;
 
         try {
             const form = new FormData();
             form.append("video", fs.createReadStream(filePath));
 
-            const result = await axios.post(
+            result = await axios.post(
                 process.env.PYTHON_API,
                 form,
                 {
@@ -62,20 +95,35 @@ app.post("/upload", upload.single("video"), async (req, res) => {
                 }
             );
 
-            videoUrl = result.data.outputVideo;
-
         } catch (err) {
             console.log("Python error:", err.message);
+            result = { data: { outputVideo: null, khmer: "failed" } };
         }
 
-        /* clean file */
+        const videoUrl = result.data.outputVideo;
+        const khmerText = result.data.khmer || "";
+
+        /* =========================
+           AUTO SAVE FIREBASE
+        ========================= */
+        await saveToFirebase(
+            "original video text",
+            khmerText,
+            videoUrl
+        );
+
+        /* =========================
+           CLEAN FILE
+        ========================= */
         fs.unlink(filePath, () => {});
 
-        /* SAFE RESPONSE (NO FAKE STRING) */
+        /* =========================
+           RESPONSE
+        ========================= */
         return res.json({
             status: "ok",
-            outputVideo: videoUrl || null,
-            message: "Done"
+            outputVideo: videoUrl,
+            khmer: khmerText
         });
 
     } catch (err) {
@@ -93,8 +141,11 @@ app.post("/upload", upload.single("video"), async (req, res) => {
     }
 });
 
-/* Start server */
+/* =========================
+   START SERVER
+========================= */
 const PORT = process.env.PORT || 1000;
+
 app.listen(PORT, () => {
-    console.log("Server running on", PORT);
+    console.log("Server running on port", PORT);
 });

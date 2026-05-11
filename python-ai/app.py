@@ -1,46 +1,60 @@
 from flask import Flask, request, jsonify
 import subprocess
 import os
+import whisper
+from googletrans import Translator
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# load AI model
+model = whisper.load_model("base")
+translator = Translator()
+
 @app.route("/")
 def home():
-    return "AI Video System Running 🚀"
+    return "AI Translator Running 🚀"
 
 @app.route("/process", methods=["POST"])
 def process():
 
-    input_path = os.path.join(UPLOAD_FOLDER, "input.mp4")
-    output_path = os.path.join(UPLOAD_FOLDER, "output.mp4")
+    try:
+        video_path = os.path.join(UPLOAD_FOLDER, "input.mp4")
+        audio_path = os.path.join(UPLOAD_FOLDER, "audio.wav")
 
-    # save video
-    file = request.files["video"]
-    file.save(input_path)
+        file = request.files["video"]
+        file.save(video_path)
 
-    # 🔥 FFmpeg optimize (low RAM for Render)
-    cmd = [
-        "ffmpeg",
-        "-i", input_path,
-        "-vf", "scale=640:360",
-        "-preset", "ultrafast",
-        "-y",
-        output_path
-    ]
+        # 🎧 STEP 1: extract audio
+        subprocess.run([
+            "ffmpeg", "-i", video_path,
+            "-ar", "16000",
+            "-ac", "1",
+            audio_path,
+            "-y"
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    subprocess.run(cmd)
+        # 🧠 STEP 2: speech to text
+        result = model.transcribe(audio_path)
+        text = result["text"]
 
-    # 🧠 TEMP KHMER TEXT (placeholder)
-    khmer_text = "វីដេអូបានបំលែងរួចរាល់"
+        # 🌍 STEP 3: translate to Khmer
+        translated = translator.translate(text, dest="km").text
 
-    return jsonify({
-        "status": "done",
-        "khmer": khmer_text,   # ✅ FIXED (IMPORTANT)
-        "outputVideo": "/files/output.mp4"
-    })
+        return jsonify({
+            "status": "done",
+            "originalText": text,
+            "khmer": translated
+        })
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "khmer": "translation failed",
+            "message": str(e)
+        })
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

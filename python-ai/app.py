@@ -17,11 +17,11 @@ def process():
     input_path = os.path.join(UPLOAD_FOLDER, "input.mp4")
     output_path = os.path.join(UPLOAD_FOLDER, "output.mp4")
 
-    # save file
+    # save video
     file = request.files["video"]
     file.save(input_path)
 
-    # 🔥 FFmpeg (NO RAM CRASH)
+    # 🔥 FFmpeg optimize (low RAM for Render)
     cmd = [
         "ffmpeg",
         "-i", input_path,
@@ -33,9 +33,13 @@ def process():
 
     subprocess.run(cmd)
 
+    # 🧠 TEMP KHMER TEXT (placeholder)
+    khmer_text = "វីដេអូបានបំលែងរួចរាល់"
+
     return jsonify({
         "status": "done",
-        "video": "/files/output.mp4"
+        "khmer": khmer_text,   # ✅ FIXED (IMPORTANT)
+        "outputVideo": "/files/output.mp4"
     })
 
 if __name__ == "__main__":

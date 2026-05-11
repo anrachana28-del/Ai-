@@ -17,20 +17,12 @@ app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 /* =========================
-   UPLOAD FOLDER
+   UPLOAD CONFIG
 ========================= */
-const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-const upload = multer({
-    dest: uploadDir,
-    limits: { fileSize: 50 * 1024 * 1024 }
-});
+const upload = multer({ dest: "uploads/" });
 
 /* =========================
-   CLOUDINARY CONFIG
+   CLOUDINARY
 ========================= */
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD,
@@ -39,7 +31,7 @@ cloudinary.config({
 });
 
 /* =========================
-   FIREBASE INIT (SAFE)
+   FIREBASE SAFE INIT
 ========================= */
 let db = null;
 
@@ -47,9 +39,7 @@ try {
     const serviceAccount = {
         project_id: process.env.FIREBASE_PROJECT_ID,
         client_email: process.env.FIREBASE_CLIENT_EMAIL,
-        private_key: process.env.FIREBASE_PRIVATE_KEY
-            ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
-            : undefined
+        private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n")
     };
 
     if (serviceAccount.project_id && serviceAccount.private_key) {
@@ -61,20 +51,20 @@ try {
         console.log("🔥 Firebase connected");
     }
 
-} catch (err) {
-    console.log("Firebase init error:", err.message);
+} catch (e) {
+    console.log("Firebase error:", e.message);
 }
 
 /* =========================
-   SAVE FIREBASE
+   SAVE FUNCTION
 ========================= */
-async function saveToFirebase(original, khmer, videoUrl) {
+async function saveToFirebase(originalText, khmerText, videoUrl) {
     if (!db) return;
 
     try {
         await db.collection("ai_videos").add({
-            original,
-            khmer,
+            original: originalText,
+            khmer: khmerText,
             videoUrl,
             createdAt: Date.now()
         });
@@ -91,7 +81,7 @@ app.get("/", (req, res) => {
 });
 
 /* =========================
-   UPLOAD + AI PIPELINE
+   MAIN UPLOAD ROUTE
 ========================= */
 app.post("/upload", upload.single("video"), async (req, res) => {
 
@@ -104,50 +94,43 @@ app.post("/upload", upload.single("video"), async (req, res) => {
         }
 
         /* =========================
-           1. UPLOAD CLOUDINARY
+           1. CLOUDINARY UPLOAD
         ========================= */
-        const cloudResult = await cloudinary.uploader.upload(filePath, {
+        const cloud = await cloudinary.uploader.upload(filePath, {
             resource_type: "video"
         });
 
-        const videoUrl = cloudResult.secure_url;
+        const videoUrl = cloud.secure_url;
 
         /* =========================
            2. CALL PYTHON AI
         ========================= */
         let khmerText = "";
+        let originalText = "";
 
         try {
             const result = await axios.post(
                 process.env.PYTHON_API,
                 { videoUrl },
-                { timeout: 300000 }
+                { timeout: 600000 }
             );
 
             console.log("PYTHON RESPONSE:", result.data);
 
-            /* =========================
-               SAFE MAPPING (FIX)
-            ========================= */
-            khmerText =
-                result.data?.khmer ||
-                result.data?.text ||
-                result.data?.result ||
-                "no translation";
+            khmerText = result.data?.khmer || "no khmer text";
+            originalText = result.data?.originalText || "";
 
         } catch (err) {
             console.log("Python error:", err.response?.data || err.message);
+
             khmerText = "translation failed";
+            originalText = "";
         }
 
         /* =========================
            3. SAVE FIREBASE
         ========================= */
-        await saveToFirebase(
-            "video",
-            khmerText,
-            videoUrl
-        );
+        await saveToFirebase(originalText, khmerText, videoUrl);
 
         /* =========================
            4. CLEAN FILE
@@ -160,6 +143,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
         return res.json({
             status: "ok",
             outputVideo: videoUrl,
+            originalText,
             khmer: khmerText
         });
 
@@ -170,7 +154,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
         if (filePath) fs.unlink(filePath, () => {});
 
         return res.status(500).json({
-            error: "Server crash",
+            error: "Server error",
             message: err.message
         });
     }

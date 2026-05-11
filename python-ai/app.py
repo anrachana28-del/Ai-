@@ -5,7 +5,7 @@ import uuid
 import cloudinary
 import cloudinary.uploader
 
-from moviepy import VideoFileClip  # ✅ FIXED (no moviepy.editor)
+from moviepy.editor import VideoFileClip
 import whisper
 from deep_translator import GoogleTranslator
 

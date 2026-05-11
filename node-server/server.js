@@ -11,13 +11,13 @@ require("dotenv").config();
 const app = express();
 
 /* =========================
-   SAFE CORS + JSON
+   BASIC MIDDLEWARE
 ========================= */
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 /* =========================
-   UPLOAD FOLDER SAFE
+   UPLOAD FOLDER
 ========================= */
 const uploadDir = path.join(__dirname, "uploads");
 
@@ -26,47 +26,53 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 /* =========================
-   MULTER
+   MULTER CONFIG
 ========================= */
 const upload = multer({
     dest: uploadDir,
-    limits: { fileSize: 10 * 1024 * 1024 }
+    limits: { fileSize: 50 * 1024 * 1024 } // 50MB safe
 });
 
 /* =========================
-   FIREBASE SAFE INIT (FIXED)
+   FIREBASE SAFE INIT
 ========================= */
-try {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_KEY || "{}");
+let db = null;
 
-    admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount)
-    });
+try {
+    const serviceAccount = {
+        project_id: process.env.FIREBASE_PROJECT_ID,
+        client_email: process.env.FIREBASE_CLIENT_EMAIL,
+        private_key: process.env.FIREBASE_PRIVATE_KEY
+            ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
+            : undefined
+    };
+
+    if (serviceAccount.project_id && serviceAccount.private_key) {
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount)
+        });
+
+        db = admin.firestore();
+        console.log("🔥 Firebase Connected");
+    } else {
+        console.log("⚠️ Firebase ENV missing");
+    }
 
 } catch (err) {
-    console.log("Firebase init skipped or error:", err.message);
+    console.log("Firebase init error:", err.message);
 }
 
-const db = admin.firestore ? admin.firestore() : null;
-
 /* =========================
-   HEALTH CHECK
-========================= */
-app.get("/", (req, res) => {
-    res.send("AI Video Server Running 🚀");
-});
-
-/* =========================
-   SAVE FUNCTION
+   SAVE TO FIREBASE
 ========================= */
 async function saveToFirebase(original, khmer, videoUrl) {
     if (!db) return;
 
     try {
         await db.collection("ai_videos").add({
-            original,
-            khmer,
-            videoUrl,
+            original: original || "",
+            khmer: khmer || "",
+            videoUrl: videoUrl || "",
             createdAt: Date.now()
         });
     } catch (err) {
@@ -75,7 +81,14 @@ async function saveToFirebase(original, khmer, videoUrl) {
 }
 
 /* =========================
-   UPLOAD API
+   HEALTH CHECK
+========================= */
+app.get("/", (req, res) => {
+    res.send("AI Video System Running 🚀");
+});
+
+/* =========================
+   UPLOAD + AI PROCESS
 ========================= */
 app.post("/upload", upload.single("video"), async (req, res) => {
 
@@ -95,7 +108,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
         let khmerText = "";
 
         /* =========================
-           CALL PYTHON SAFELY
+           CALL PYTHON API
         ========================= */
         try {
             const form = new FormData();
@@ -121,7 +134,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
            AUTO SAVE FIREBASE
         ========================= */
         await saveToFirebase(
-            "original text",
+            "original video text",
             khmerText,
             videoUrl
         );
@@ -131,6 +144,9 @@ app.post("/upload", upload.single("video"), async (req, res) => {
         ========================= */
         fs.unlink(filePath, () => {});
 
+        /* =========================
+           RESPONSE
+        ========================= */
         return res.json({
             status: "ok",
             outputVideo: videoUrl,
@@ -158,5 +174,5 @@ app.post("/upload", upload.single("video"), async (req, res) => {
 const PORT = process.env.PORT || 1000;
 
 app.listen(PORT, () => {
-    console.log("Server running on port", PORT);
+    console.log("🚀 Server running on port", PORT);
 });

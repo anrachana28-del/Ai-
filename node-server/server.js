@@ -5,7 +5,6 @@ const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
 const admin = require("firebase-admin");
-const FormData = require("form-data");
 const cloudinary = require("cloudinary").v2;
 require("dotenv").config();
 
@@ -40,7 +39,7 @@ cloudinary.config({
 });
 
 /* =========================
-   FIREBASE SAFE INIT
+   FIREBASE INIT (SAFE)
 ========================= */
 let db = null;
 
@@ -60,8 +59,6 @@ try {
 
         db = admin.firestore();
         console.log("🔥 Firebase connected");
-    } else {
-        console.log("⚠️ Firebase ENV missing");
     }
 
 } catch (err) {
@@ -69,7 +66,7 @@ try {
 }
 
 /* =========================
-   SAVE TO FIREBASE
+   SAVE FIREBASE
 ========================= */
 async function saveToFirebase(original, khmer, videoUrl) {
     if (!db) return;
@@ -98,7 +95,7 @@ app.get("/", (req, res) => {
 ========================= */
 app.post("/upload", upload.single("video"), async (req, res) => {
 
-    let filePath = req.file?.path;
+    const filePath = req.file?.path;
 
     try {
 
@@ -107,18 +104,11 @@ app.post("/upload", upload.single("video"), async (req, res) => {
         }
 
         /* =========================
-           1. UPLOAD TO CLOUDINARY
+           1. UPLOAD CLOUDINARY
         ========================= */
-        let cloudResult;
-
-        try {
-            cloudResult = await cloudinary.uploader.upload(filePath, {
-                resource_type: "video"
-            });
-        } catch (err) {
-            console.log("Cloudinary error:", err.message);
-            return res.status(500).json({ error: "Cloud upload failed" });
-        }
+        const cloudResult = await cloudinary.uploader.upload(filePath, {
+            resource_type: "video"
+        });
 
         const videoUrl = cloudResult.secure_url;
 
@@ -134,23 +124,33 @@ app.post("/upload", upload.single("video"), async (req, res) => {
                 { timeout: 300000 }
             );
 
-            khmerText = result.data.khmer || "";
+            console.log("PYTHON RESPONSE:", result.data);
+
+            /* =========================
+               SAFE MAPPING (FIX)
+            ========================= */
+            khmerText =
+                result.data?.khmer ||
+                result.data?.text ||
+                result.data?.result ||
+                "no translation";
 
         } catch (err) {
-            console.log("Python error:", err.message);
+            console.log("Python error:", err.response?.data || err.message);
+            khmerText = "translation failed";
         }
 
         /* =========================
-           3. SAVE TO FIREBASE
+           3. SAVE FIREBASE
         ========================= */
         await saveToFirebase(
-            "original video",
+            "video",
             khmerText,
             videoUrl
         );
 
         /* =========================
-           4. CLEAN TEMP FILE
+           4. CLEAN FILE
         ========================= */
         fs.unlink(filePath, () => {});
 
@@ -167,9 +167,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
 
         console.log("UPLOAD ERROR:", err.message);
 
-        if (filePath) {
-            fs.unlink(filePath, () => {});
-        }
+        if (filePath) fs.unlink(filePath, () => {});
 
         return res.status(500).json({
             error: "Server crash",
@@ -179,7 +177,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
 });
 
 /* =========================
-   START SERVER (RENDER SAFE)
+   START SERVER
 ========================= */
 const PORT = process.env.PORT || 3000;
 

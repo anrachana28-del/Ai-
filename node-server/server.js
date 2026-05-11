@@ -5,30 +5,22 @@ const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
 const admin = require("firebase-admin");
-require("dotenv").config();
 const FormData = require("form-data");
+require("dotenv").config();
 
 const app = express();
 
 /* =========================
-   FIREBASE INIT
-========================= */
-admin.initializeApp({
-    credential: admin.credential.cert(require("./firebase-key.json"))
-});
-
-const db = admin.firestore();
-
-/* =========================
-   MIDDLEWARE
+   SAFE CORS + JSON
 ========================= */
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 /* =========================
-   UPLOAD FOLDER
+   UPLOAD FOLDER SAFE
 ========================= */
 const uploadDir = path.join(__dirname, "uploads");
+
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -42,26 +34,48 @@ const upload = multer({
 });
 
 /* =========================
-   SAVE TO FIREBASE (AUTO)
+   FIREBASE SAFE INIT (FIXED)
 ========================= */
-async function saveToFirebase(original, khmer, videoUrl) {
-    await db.collection("ai_videos").add({
-        original: original,
-        khmer: khmer,
-        videoUrl: videoUrl,
-        createdAt: Date.now()
+try {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_KEY || "{}");
+
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
     });
+
+} catch (err) {
+    console.log("Firebase init skipped or error:", err.message);
 }
+
+const db = admin.firestore ? admin.firestore() : null;
 
 /* =========================
    HEALTH CHECK
 ========================= */
 app.get("/", (req, res) => {
-    res.send("AI Video System Running 🚀");
+    res.send("AI Video Server Running 🚀");
 });
 
 /* =========================
-   UPLOAD + AI + AUTO SAVE
+   SAVE FUNCTION
+========================= */
+async function saveToFirebase(original, khmer, videoUrl) {
+    if (!db) return;
+
+    try {
+        await db.collection("ai_videos").add({
+            original,
+            khmer,
+            videoUrl,
+            createdAt: Date.now()
+        });
+    } catch (err) {
+        console.log("Firebase save error:", err.message);
+    }
+}
+
+/* =========================
+   UPLOAD API
 ========================= */
 app.post("/upload", upload.single("video"), async (req, res) => {
 
@@ -77,16 +91,17 @@ app.post("/upload", upload.single("video"), async (req, res) => {
             return res.status(500).json({ error: "PYTHON_API missing" });
         }
 
-        /* =========================
-           CALL PYTHON AI
-        ========================= */
-        let result;
+        let videoUrl = null;
+        let khmerText = "";
 
+        /* =========================
+           CALL PYTHON SAFELY
+        ========================= */
         try {
             const form = new FormData();
             form.append("video", fs.createReadStream(filePath));
 
-            result = await axios.post(
+            const result = await axios.post(
                 process.env.PYTHON_API,
                 form,
                 {
@@ -95,19 +110,18 @@ app.post("/upload", upload.single("video"), async (req, res) => {
                 }
             );
 
+            videoUrl = result.data.outputVideo;
+            khmerText = result.data.khmer || "";
+
         } catch (err) {
             console.log("Python error:", err.message);
-            result = { data: { outputVideo: null, khmer: "failed" } };
         }
-
-        const videoUrl = result.data.outputVideo;
-        const khmerText = result.data.khmer || "";
 
         /* =========================
            AUTO SAVE FIREBASE
         ========================= */
         await saveToFirebase(
-            "original video text",
+            "original text",
             khmerText,
             videoUrl
         );
@@ -117,9 +131,6 @@ app.post("/upload", upload.single("video"), async (req, res) => {
         ========================= */
         fs.unlink(filePath, () => {});
 
-        /* =========================
-           RESPONSE
-        ========================= */
         return res.json({
             status: "ok",
             outputVideo: videoUrl,
@@ -142,7 +153,7 @@ app.post("/upload", upload.single("video"), async (req, res) => {
 });
 
 /* =========================
-   START SERVER
+   START SERVER (RENDER SAFE)
 ========================= */
 const PORT = process.env.PORT || 1000;
 

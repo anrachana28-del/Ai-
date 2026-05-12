@@ -9,7 +9,7 @@ app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# load AI model
+# AI models
 model = whisper.load_model("base")
 translator = Translator()
 
@@ -27,7 +27,7 @@ def process():
         file = request.files["video"]
         file.save(video_path)
 
-        # 🎧 STEP 1: extract audio
+        # STEP 1: extract audio
         subprocess.run([
             "ffmpeg", "-i", video_path,
             "-ar", "16000",
@@ -36,11 +36,11 @@ def process():
             "-y"
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # 🧠 STEP 2: speech to text
+        # STEP 2: speech to text
         result = model.transcribe(audio_path)
         text = result["text"]
 
-        # 🌍 STEP 3: translate to Khmer
+        # STEP 3: translate to Khmer
         translated = translator.translate(text, dest="km").text
 
         return jsonify({

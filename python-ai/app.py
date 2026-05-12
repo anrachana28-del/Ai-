@@ -9,25 +9,37 @@ app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# AI models
-model = whisper.load_model("base")
+# Lazy load models (IMPORTANT for Render stability)
+model = None
 translator = Translator()
+
+def get_whisper_model():
+    global model
+    if model is None:
+        model = whisper.load_model("base")
+    return model
+
 
 @app.route("/")
 def home():
     return "AI Translator Running 🚀"
 
+
 @app.route("/process", methods=["POST"])
 def process():
-
     try:
+        # Validate file
+        if "video" not in request.files:
+            return jsonify({"status": "error", "message": "No video file uploaded"}), 400
+
+        file = request.files["video"]
+
         video_path = os.path.join(UPLOAD_FOLDER, "input.mp4")
         audio_path = os.path.join(UPLOAD_FOLDER, "audio.wav")
 
-        file = request.files["video"]
         file.save(video_path)
 
-        # STEP 1: extract audio
+        # STEP 1: extract audio (ffmpeg)
         subprocess.run([
             "ffmpeg", "-i", video_path,
             "-ar", "16000",
@@ -36,9 +48,10 @@ def process():
             "-y"
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # STEP 2: speech to text
-        result = model.transcribe(audio_path)
-        text = result["text"]
+        # STEP 2: speech to text (Whisper)
+        whisper_model = get_whisper_model()
+        result = whisper_model.transcribe(audio_path)
+        text = result.get("text", "")
 
         # STEP 3: translate to Khmer
         translated = translator.translate(text, dest="km").text
@@ -52,9 +65,11 @@ def process():
     except Exception as e:
         return jsonify({
             "status": "error",
-            "khmer": "translation failed",
             "message": str(e)
-        })
+        }), 500
 
+
+# IMPORTANT: Render uses PORT env variable
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
